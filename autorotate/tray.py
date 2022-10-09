@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import subprocess
 from importlib import resources
 from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QAction
