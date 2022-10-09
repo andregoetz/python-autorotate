@@ -1,10 +1,10 @@
 #!/usr/bin/env python
-
 from time import sleep
 from os import path as op
 import sys
 from subprocess import call, check_output
 from glob import glob
+import re
 
 
 def bdopen(fname):
@@ -45,6 +45,31 @@ def find_xdevices():
     return touchscreens, touchpads
 
 
+def init_reversed_sink():
+    sinks = check_output(['pactl', 'list', 'sinks']).decode()
+
+    if not re.search(check_remapped_re, sinks):
+        call(['pactl', 'load-module', 'module-remap-sink', 'sink_name=reverse-stereo', 'master=0', 'channels=2', 'master_channel_map=front-right,front-left', 'channel_map=front-left,front-right'])
+        sinks = check_output(['pactl', 'list', 'sinks']).decode()
+
+    sink_ids = re.findall(index_re, sinks)
+    return sink_ids
+
+
+def switch_sink(new_state, current_state, sink_ids):
+    s = STATES[new_state]
+    cur_s = STATES[new_state if current_state is None else current_state]
+
+    if s['reversed'] and not cur_s['reversed']:
+        target_sink = sink_ids[1]
+    elif cur_s['reversed'] and not s['reversed']:
+        target_sink = sink_ids[0]
+    else:
+        return
+
+    call(['pactl', 'set-default-sink', target_sink])
+
+
 def start_rotate_loop():
     current_state = None
 
@@ -53,8 +78,9 @@ def start_rotate_loop():
         y = read_accel(accel_y)
         for i in range(4):
             if i != current_state and STATES[i]['check'](x, y):
-                current_state = i
                 rotate(i)
+                switch_sink(i, current_state, sink_ids)
+                current_state = i
                 break
         sleep(1)
 
@@ -74,17 +100,22 @@ if __name__ == '__main__':
 
     STATES = [
         {'rot': 'normal', 'coord': '1 0 0 0 1 0 0 0 1', 'touchpad': 'enable',
-        'check': lambda x, y: y <= -g},
+        'check': lambda x, y: y <= -g, 'reversed': False},
         {'rot': 'inverted', 'coord': '-1 0 1 0 -1 1 0 0 1', 'touchpad': 'disable',
-        'check': lambda x, y: y >= g},
+        'check': lambda x, y: y >= g, 'reversed': True},
         {'rot': 'left', 'coord': '0 -1 1 1 0 0 0 0 1', 'touchpad': 'disable',
-        'check': lambda x, y: x >= g},
+        'check': lambda x, y: x >= g, 'reversed': False},
         {'rot': 'right', 'coord': '0 1 0 -1 0 1 0 0 1', 'touchpad': 'disable',
-        'check': lambda x, y: x <= -g},
+        'check': lambda x, y: x <= -g, 'reversed': False},
     ]
 
     accel_x = bdopen('in_accel_x_raw')
     accel_y = bdopen('in_accel_y_raw')
+
+    index_re = re.compile('Name: (.+)')
+    check_remapped_re = re.compile('Name: reverse-stereo')
+
+    sink_ids = init_reversed_sink()
 
     disable_touchpads = False
 
