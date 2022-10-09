@@ -15,6 +15,11 @@ def read(fname):
     return bdopen(fname).read()
 
 
+def read_accel(fp):
+    fp.seek(0)
+    return float(fp.read()) * scale
+
+
 def rotate(state):
     s = STATES[state]
     call(['xrandr', '-o', s['rot']])
@@ -28,9 +33,13 @@ def rotate(state):
             call(['xinput', s['touchpad'], dev])
 
 
-def read_accel(fp):
-    fp.seek(0)
-    return float(fp.read()) * scale
+def switch_sink(new_state, cur_state):
+    new_s = STATES[new_state]
+    cur_s = STATES[cur_state]
+
+    if new_s['sink'] != cur_s['sink']:
+        target_sink = sink_ids[new_s['sink']]
+        call(['pactl', 'set-default-sink', target_sink])
 
 
 def find_xdevices():
@@ -46,32 +55,22 @@ def find_xdevices():
 
 
 def init_reversed_sink():
+    reverse_sink = 'reverse-stereo'
     sinks = check_output(['pactl', 'list', 'sinks']).decode()
+    sinks = re.findall(re.compile('Name: (.+)'), sinks)
 
-    if not re.search(check_remapped_re, sinks):
-        call(['pactl', 'load-module', 'module-remap-sink', 'sink_name=reverse-stereo', 'master=0', 'channels=2', 'master_channel_map=front-right,front-left', 'channel_map=front-left,front-right'])
-        sinks = check_output(['pactl', 'list', 'sinks']).decode()
+    if reverse_sink not in sinks:
+        call(['pactl', 'load-module', 'module-remap-sink', f'sink_name={reverse_sink}', 'master=0', 'channels=2', 'master_channel_map=front-right,front-left', 'channel_map=front-left,front-right'])
 
-    sink_ids = re.findall(index_re, sinks)
-    return sink_ids
+    default_sink = check_output(['pactl', 'get-default-sink']).decode().strip()
+    if default_sink == reverse_sink:
+        default_sink = next(filter(lambda s: s != reverse_sink, sinks))
 
-
-def switch_sink(new_state, current_state, sink_ids):
-    s = STATES[new_state]
-    cur_s = STATES[new_state if current_state is None else current_state]
-
-    if s['reversed'] and not cur_s['reversed']:
-        target_sink = sink_ids[1]
-    elif cur_s['reversed'] and not s['reversed']:
-        target_sink = sink_ids[0]
-    else:
-        return
-
-    call(['pactl', 'set-default-sink', target_sink])
+    return {'default': default_sink, 'reversed': reverse_sink}
 
 
-def start_rotate_loop():
-    current_state = None
+def start_rotation_loop():
+    current_state = 1 # ensures sink/rotation to be default/normal on first run
 
     while True:
         x = read_accel(accel_x)
@@ -79,7 +78,7 @@ def start_rotate_loop():
         for i in range(4):
             if i != current_state and STATES[i]['check'](x, y):
                 rotate(i)
-                switch_sink(i, current_state, sink_ids)
+                switch_sink(i, current_state)
                 current_state = i
                 break
         sleep(1)
@@ -100,23 +99,20 @@ if __name__ == '__main__':
 
     STATES = [
         {'rot': 'normal', 'coord': '1 0 0 0 1 0 0 0 1', 'touchpad': 'enable',
-        'check': lambda x, y: y <= -g, 'reversed': False},
+        'check': lambda x, y: y <= -g, 'sink': 'default'},
         {'rot': 'inverted', 'coord': '-1 0 1 0 -1 1 0 0 1', 'touchpad': 'disable',
-        'check': lambda x, y: y >= g, 'reversed': True},
+        'check': lambda x, y: y >= g, 'sink': 'reversed'},
         {'rot': 'left', 'coord': '0 -1 1 1 0 0 0 0 1', 'touchpad': 'disable',
-        'check': lambda x, y: x >= g, 'reversed': False},
+        'check': lambda x, y: x >= g, 'sink': 'default'},
         {'rot': 'right', 'coord': '0 1 0 -1 0 1 0 0 1', 'touchpad': 'disable',
-        'check': lambda x, y: x <= -g, 'reversed': False},
+        'check': lambda x, y: x <= -g, 'sink': 'default'},
     ]
 
     accel_x = bdopen('in_accel_x_raw')
     accel_y = bdopen('in_accel_y_raw')
 
-    index_re = re.compile('Name: (.+)')
-    check_remapped_re = re.compile('Name: reverse-stereo')
-
     sink_ids = init_reversed_sink()
 
     disable_touchpads = False
 
-    start_rotate_loop()
+    start_rotation_loop()
