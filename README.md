@@ -1,6 +1,6 @@
 # Autorotate
 
-Rotates your screen on a device with an accelerator device.
+Rotates your screen on a device with an accelerator device that is running **KDE Plasma on Wayland**.
 
 Includes a tray icon app to enable and disable the automatic rotation.
 

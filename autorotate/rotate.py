@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 from time import sleep
+import os
 from os import path as op
 import sys
 from subprocess import call, check_output
@@ -22,12 +23,15 @@ def read_accel(fp):
 
 def rotate(state):
     s = STATES[state]
-    call(['xrandr', '-o', s['rot']])
-    for dev in touchscreens if disable_touchpads else (touchscreens + touchpads):
-        call([
-            'xinput', 'set-prop', dev,
-            'Coordinate Transformation Matrix',
-        ] + s['coord'].split())
+    if wayland:
+        call(['kscreen-doctor', 'output.1.rotation.' + s['rot']])
+    else:
+        call(['xrandr', '-o', s['rot']])
+        for dev in touchscreens if disable_touchpads else (touchscreens + touchpads):
+            call([
+                'xinput', 'set-prop', dev,
+                'Coordinate Transformation Matrix',
+            ] + s['coord'].split())
     if disable_touchpads:
         for dev in touchpads:
             call(['xinput', s['touchpad'], dev])
@@ -114,5 +118,7 @@ if __name__ == '__main__':
     sink_ids = init_reversed_sink()
 
     disable_touchpads = False
+
+    wayland = os.environ.get("WAYLAND_DISPLAY")
 
     start_rotation_loop()
